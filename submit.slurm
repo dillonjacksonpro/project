@@ -23,6 +23,10 @@
 
 set -e
 
+if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+	exec sbatch "$0" "$@"
+fi
+
 # Get input file from argument or use default
 INPUT_FILE="${1:-input.txt}"
 

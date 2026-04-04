@@ -196,23 +196,19 @@ echo "  $NODE_MAP"
 echo ""
 
 # ============================================================================
-# Build the binary if needed
+# Build the binary
 # ============================================================================
 
 echo "=========================================="
-echo "Building binary (if needed)..."
+echo "Building binary..."
 echo "=========================================="
 
-if [[ ! -f "./mpi_orch" ]]; then
-    if [[ -f "Makefile" ]]; then
-        make
-        echo "✓ Build successful"
-    else
-        echo "Error: Binary not found and no Makefile to build from" >&2
-        exit 1
-    fi
+if [[ -f "Makefile" ]]; then
+    make
+    echo "✓ Build successful"
 else
-    echo "✓ Binary already present, skipping build"
+    echo "Error: Makefile not found; cannot build mpi_orch" >&2
+    exit 1
 fi
 
 echo ""
