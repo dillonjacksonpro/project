@@ -19,6 +19,12 @@
 
 set -e
 
+print_slurm_env() {
+    echo "--- SLURM env dump ---"
+    env | grep '^SLURM_' | sort || true
+    echo "--- end SLURM env dump ---"
+}
+
 # ============================================================================
 # Configuration - Defaults (can be overridden by args or SLURM env)
 # ============================================================================
@@ -184,6 +190,9 @@ echo "Nodes: $NUM_NODES (max $MAX_THREADS_PER_NODE threads each)"
 echo "Node list: $SLURM_NODELIST"
 echo "Partition: ${PARTITION:-default}"
 echo "Input path: $INPUT_FILE"
+echo ""
+
+print_slurm_env
 echo ""
 
 # Validate input directory
