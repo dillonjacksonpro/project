@@ -203,12 +203,16 @@ echo "=========================================="
 echo "Building binary (if needed)..."
 echo "=========================================="
 
-if [[ -f "Makefile" ]]; then
-    make clean
-    make
-    echo "✓ Build successful"
+if [[ ! -f "./mpi_orch" ]]; then
+    if [[ -f "Makefile" ]]; then
+        make
+        echo "✓ Build successful"
+    else
+        echo "Error: Binary not found and no Makefile to build from" >&2
+        exit 1
+    fi
 else
-    echo "⚠ No Makefile found, assuming binary is pre-built"
+    echo "✓ Binary already present, skipping build"
 fi
 
 echo ""
