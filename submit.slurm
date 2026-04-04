@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH --job-name=mpi_orch
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --time=00:10:00
+#SBATCH --output=mpi_orch_%j.out
+#SBATCH --error=mpi_orch_%j.err
+
+# ============================================================================
+# submit.slurm - SLURM wrapper for run_mpi_orch.sh
+# ============================================================================
+# Allocates SLURM resources and passes them to the main bash script
+#
+# Usage:
+#   sbatch submit.slurm [INPUT_FILE]
+#
+# The SLURM environment variables (SLURM_NNODES, SLURM_CPUS_PER_TASK, etc.)
+# are automatically passed to run_mpi_orch.sh
+#
+# ============================================================================
+
+set -e
+
+# Get input file from argument or use default
+INPUT_FILE="${1:-input.txt}"
+
+# Call the main runner script, passing argument and inheriting SLURM env vars
+./run_mpi_orch.sh --input "$INPUT_FILE"
+
+exit $?
