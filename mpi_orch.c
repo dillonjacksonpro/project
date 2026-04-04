@@ -99,6 +99,17 @@ int main(int argc, char *argv[]) {
    MPI_Comm_size(MPI_COMM_WORLD, &size);
    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+   // get host name and print it
+   char hostname[256];
+   gethostname(hostname, sizeof(hostname));
+   printf("Rank %d of %d running on %s\n", rank, size, hostname);
+
+   // get mpi hostname and print it
+   char mpi_hostname[MPI_MAX_PROCESSOR_NAME];
+   int mpi_hostname_len = 0;
+   MPI_Get_processor_name(mpi_hostname, &mpi_hostname_len);
+   printf("Rank %d of %d MPI hostname: %s\n", rank, size, mpi_hostname);
+
    int fd = open(options.input_path, O_RDONLY);
    if (fd < 0) {
       perror("open");
@@ -163,7 +174,8 @@ int main(int argc, char *argv[]) {
    munmap(data, file_size);
 
    // openmp processing of list here
-   #pragma omp parallel for
+   // use max threads from options for omp parallelism
+   #pragma omp parallel for num_threads(options.max_threads > 0 ? options.max_threads : 1)
    for(size_t i = 0; i < job_count; i++) {
       // Process job_array[i]
       printf("Rank %d processing job: %s\n", rank, job_array[i]);
