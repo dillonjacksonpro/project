@@ -68,7 +68,7 @@ echo
 
 if command -v sacctmgr >/dev/null 2>&1; then
     echo "--- User association limits ---"
-    assoc_cmd=(sacctmgr show assoc user="$user_name" format=User,Account,Partition,QOS,GrpJobs,GrpSubmit,MaxJobs,MaxSubmit,MaxTRESPU,MaxTRES,DefQOS -Pn)
+    assoc_cmd=(sacctmgr show assoc user="$user_name" format=User,Account,Partition,QOS,GrpJobs,GrpSubmit,MaxJobs,MaxSubmit,MaxTRESPU -Pn)
     if [[ -n "$account_name" ]]; then
         assoc_cmd+=(account="$account_name")
     fi
@@ -84,17 +84,20 @@ fi
 
 echo "--- Relevant QOS records ---"
 if command -v sacctmgr >/dev/null 2>&1; then
-    qos_list=$(scontrol show partition "$partition" 2>/dev/null | sed -n 's/.*AllowQos=\([^ ]*\).*/\1/p' | tr ',' ' ' || true)
+    qos_list=$(scontrol show partition "$partition" 2>/dev/null | sed -n 's/.*QoS=\([^ ]*\).*/\1/p' | tr ',' ' ' || true)
     if [[ -n "$qos_list" ]]; then
         for qos_name in $qos_list; do
+            if [[ "$qos_name" == "ALL" ]]; then
+                continue
+            fi
             echo "QOS: $qos_name"
-            if ! sacctmgr show qos name="$qos_name" format=Name,Priority,MaxJobsPerUser,MaxSubmitJobsPerUser,MaxWall,MaxTRESPU,MaxTRESPJ,GrpJobs,GrpSubmit,GrpTRES -Pn; then
+            if ! sacctmgr show qos name="$qos_name" format=Name,Priority,MaxJobsPerUser,MaxSubmitJobsPerUser,MaxWall,MaxTRESPU,GrpJobs,GrpSubmit,GrpTRES -Pn; then
                 echo "Warning: could not read QOS $qos_name" >&2
             fi
             echo
         done
     else
-        echo "No AllowQos entry found on partition $partition"
+        echo "No partition QoS entry found on partition $partition"
     fi
 else
     echo "sacctmgr is not available on this system"
