@@ -1,0 +1,5 @@
+sacctmgr show assoc user=$USER partition=<partition_name> format=User,Account,Partition,MaxJobs,MaxSubmitJobs,MaxTRESPU,MaxWall
+
+
+
+sacctmgr show assoc user=$USER format=User,Account,Partition

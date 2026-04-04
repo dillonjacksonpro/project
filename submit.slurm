@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mpi_orch
-#SBATCH --nodes=2
+#SBATCH --partition=rss-class
+#SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --time=00:10:00
@@ -13,7 +14,7 @@
 # Allocates SLURM resources and passes them to the main bash script
 #
 # Usage:
-#   sbatch -p <partition> submit.slurm [INPUT_FILE]
+#   sbatch submit.slurm [INPUT_FILE]
 #
 # The SLURM environment variables (SLURM_NNODES, SLURM_CPUS_PER_TASK, etc.)
 # are automatically passed to run_mpi_orch.sh

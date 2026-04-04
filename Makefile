@@ -5,7 +5,7 @@ TARGET := mpi_orch
 SRC := mpi_orch.c glib_compat.c
 
 GCC_MODULE ?= gcc
-MPI_MODULE ?= mpi
+MPI_MODULES ?= mpi openmpi/4.1.1_gcc_9.5.0
 
 CFLAGS := -std=c11 -O0 -g3 -fno-omit-frame-pointer -pipe \
           -Wall -Wextra -Wpedantic -Wformat=2 -Wshadow \
@@ -33,8 +33,10 @@ $(TARGET): $(SRC)
 				module load $(GCC_MODULE) || true; \
 			fi; \
 			if [[ $$have_mpicc -eq 0 ]]; then \
-				echo "Loading module: $(MPI_MODULE)"; \
-				module load $(MPI_MODULE) || true; \
+				for mpi_module in $(MPI_MODULES); do \
+					echo "Loading module: $$mpi_module"; \
+					module load $$mpi_module && break || true; \
+				done; \
 			fi; \
 		fi; \
 	fi; \
@@ -44,11 +46,11 @@ $(TARGET): $(SRC)
 		missing=1; \
 	fi; \
 	if ! command -v $(CC) >/dev/null 2>&1; then \
-		echo "Missing build tool: $(CC) (or load MPI module, e.g. $(MPI_MODULE))"; \
+		echo "Missing build tool: $(CC) (or load an MPI module, e.g. $(word 1,$(MPI_MODULES)) or openmpi/4.1.1_gcc_9.5.0)"; \
 		missing=1; \
 	fi; \
 	if ! printf 'int main(void){return 0;}\n' | $(CC) -x c -fopenmp -o /dev/null - >/dev/null 2>&1; then \
-		echo "Missing OpenMP support for $(CC) (load compiler/MPI modules with OpenMP, e.g. $(GCC_MODULE) and $(MPI_MODULE))"; \
+		echo "Missing OpenMP support for $(CC) (load compiler/MPI modules with OpenMP, e.g. $(GCC_MODULE) and one of: $(MPI_MODULES))"; \
 		missing=1; \
 	fi; \
 	if [[ $$missing -ne 0 ]]; then \
