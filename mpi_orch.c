@@ -1,5 +1,6 @@
 #include <fcntl.h>
-#include <glib.h>
+/* #include <glib.h> */
+#include "glib_compat.h"
 #include <inttypes.h>
 #include <mpi.h>
 #include <omp.h>
@@ -28,14 +29,16 @@
 #define TAG_MEDIAN_F1  101
 #define TAG_MEDIAN_F2  102
 
+/* Change MetricValue and update the two format macros to match */
+typedef uint64_t MetricValue;
+typedef uint64_t MedianValue;
+#define PRI_METRIC  PRIu64
+#define SCN_METRIC  SCNu64
+
 typedef int      FieldIndex;
 typedef int      MpiRank;
 typedef int      MpiTag;
 typedef int      MpiCount;
-typedef int      ParsedCsvValue;
-typedef int      ScanChars;
-typedef uint64_t MetricValue;
-typedef uint64_t MedianValue;
 
 static const MpiTag MEDIAN_TAGS[N_MEDIAN_FIELDS]    = { TAG_MEDIAN_F0, TAG_MEDIAN_F1, TAG_MEDIAN_F2 };
 
@@ -557,8 +560,12 @@ int main(int argc, char *argv[])
       while (idx_cursor < idx_end) {
          char *line_nl = memchr(idx_cursor, '\n', (size_t)(idx_end - idx_cursor));
          size_t len = line_nl ? (size_t)(line_nl - idx_cursor) : (size_t)(idx_end - idx_cursor);
-         if (mpi_size > 0 && (line % mpi_size) == (size_t)rank)
-            job_array[job_count++] = g_strndup(idx_cursor, len);
+         if (mpi_size > 0 && (line % mpi_size) == (size_t)rank) {
+            if (job_count < MAX_JOBS)
+               job_array[job_count++] = g_strndup(idx_cursor, len);
+            else
+               fprintf(stderr, "rank %d: job_array full at line %zu, skipping\n", rank, line);
+         }
          idx_cursor = line_nl ? line_nl + 1 : idx_end;
          line++;
       }
@@ -603,20 +610,16 @@ int main(int argc, char *argv[])
          cursor = header_nl ? header_nl + 1 : file_end;
 
          char field1_buf[CSV_FIELD1_MAX];
-         ParsedCsvValue f2, f3, f4;
-         ScanChars consumed_raw;
-         size_t consumed;
+         MetricValue f2, f3, f4;
 
          while (cursor < file_end) {
-            consumed_raw = 0;
-            /* %*[^\n]%n — no trailing \n in format so the last line (no newline
-               at EOF) is still consumed; we advance past \n manually below.   */
-            if (sscanf(cursor, "%255[^,],%d,%d,%d%*[^\n]%n",
-                       field1_buf, &f2, &f3, &f4, &consumed_raw) >= 4 && consumed_raw > 0) {
-               consumed = (size_t)consumed_raw;
-               CsvRow row = { .field2 = (MetricValue)f2,
-                              .field3 = (MetricValue)f3,
-                              .field4 = (MetricValue)f4 };
+            /* Advance past current line regardless of parse outcome */
+            const char *line_nl = memchr(cursor, '\n', (size_t)(file_end - cursor));
+            char *next = line_nl ? (char *)line_nl + 1 : file_end;
+
+            if (sscanf(cursor, "%255[^,],%" SCN_METRIC ",%" SCN_METRIC ",%" SCN_METRIC,
+                       field1_buf, &f2, &f3, &f4) == 4) {
+               CsvRow row = { .field2 = f2, .field3 = f3, .field4 = f4 };
                g_strlcpy(row.field1, field1_buf, CSV_FIELD1_MAX);
                node_agg_update(my_agg, &row);
 
@@ -624,13 +627,8 @@ int main(int argc, char *argv[])
                stage_buf_append(&stage[0], row.field2, 0, dest_ranks[0], queue);
                stage_buf_append(&stage[1], row.field3, 1, dest_ranks[1], queue);
                stage_buf_append(&stage[2], row.field4, 2, dest_ranks[2], queue);
-
-               cursor += consumed;
-               if (cursor < file_end && *cursor == '\n') cursor++;
-            } else {
-               const char *line_nl = memchr(cursor, '\n', (size_t)(file_end - cursor));
-               cursor = line_nl ? (char *)line_nl + 1 : file_end;
             }
+            cursor = next;
          }
 
          munmap(file_data, file_size);
@@ -716,16 +714,16 @@ int main(int argc, char *argv[])
          double avg = final_agg.total_lines
             ? (double)sums[fi] / (double)final_agg.total_lines : 0.0;
          printf("%s:\n",                    names[fi]);
-         printf("  Sum:    %" PRIu64 "\n",  sums[fi]);
-         printf("  Avg:    %.4f\n",         avg);
-         printf("  Median: %" PRIu64 "\n",  medians[fi]);
+         printf("  Sum:    %" PRI_METRIC "\n",  sums[fi]);
+         printf("  Avg:    %.4f\n",             avg);
+         printf("  Median: %" PRI_METRIC "\n",  medians[fi]);
          printf("  Top %d:\n", AGG_TOP_N);
          for (size_t j = 0; j < tops[fi]->count; j++)
-            printf("    key=%" PRIu64 " name=%s\n",
+            printf("    key=%" PRI_METRIC " name=%s\n",
                    tops[fi]->entries[j].key, tops[fi]->entries[j].row.field1);
          printf("  Bot %d:\n", AGG_TOP_N);
          for (size_t j = 0; j < bots[fi]->count; j++)
-            printf("    key=%" PRIu64 " name=%s\n",
+            printf("    key=%" PRI_METRIC " name=%s\n",
                    bots[fi]->entries[j].key, bots[fi]->entries[j].row.field1);
          printf("\n");
       }

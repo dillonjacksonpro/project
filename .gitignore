@@ -1,3 +1,6 @@
-./TODO.txt
-./mpi_arch
-./file_list.txt
+TODO.txt
+file_list.txt
+mpi_arch
+mpi_orch
+test_data/
+glib_usage_list.md
