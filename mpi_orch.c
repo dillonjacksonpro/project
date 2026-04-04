@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <fcntl.h>
 /* #include <glib.h> */
 #include "glib_compat.h"
@@ -390,6 +391,14 @@ median_receiver(FieldIndex field_idx, size_t mpi_size)
    return (MpiRank)(((size_t)field_idx) % mpi_size);
 }
 
+static int
+cmp_cstr_ptr(const void *a, const void *b)
+{
+   const char *const *sa = (const char *const *)a;
+   const char *const *sb = (const char *const *)b;
+   return strcmp(*sa, *sb);
+}
+
 /* ── option parsing ──────────────────────────────────────────────── */
 static gboolean
 parse_options(int *argc, char ***argv, Options *options, GError **error)
@@ -516,61 +525,87 @@ int main(int argc, char *argv[])
 
    pthread_create(&comms_thread, NULL, comms_thread_func, &comms_args);
 
-   /* ── open and mmap the job-index file ────────────────────────── */
-   int fd = open(options.input_path, O_RDONLY);
-   if (fd < 0) {
-      perror("open");
-      g_free(options.input_path); g_free(options.nodes_map);
-      MPI_Finalize(); return EXIT_FAILURE;
-   }
-   struct stat st;
-   if (fstat(fd, &st) != 0) {
-      perror("fstat"); close(fd);
-      g_free(options.input_path); g_free(options.nodes_map);
-      MPI_Finalize(); return EXIT_FAILURE;
-   }
-   if (st.st_size == 0) {
-      close(fd);
-      g_free(options.input_path); g_free(options.nodes_map);
-      MPI_Finalize(); return EXIT_SUCCESS;
-   }
-
-   size_t idx_size = (size_t)st.st_size;
-   char *idx_data  = mmap(NULL, idx_size, PROT_READ, MAP_PRIVATE, fd, 0);
-   if (idx_data == MAP_FAILED) {
-      perror("mmap"); close(fd);
-      g_free(options.input_path); g_free(options.nodes_map);
-      MPI_Finalize(); return EXIT_FAILURE;
-   }
-   close(fd);
-   madvise(idx_data, idx_size, MADV_SEQUENTIAL);
-
-   /* ── distribute job paths across ranks ───────────────────────── */
+   /* ── scan input directory and stripe paths across ranks ──────── */
    char  *job_array[MAX_JOBS];
    size_t job_count = 0;
+
    {
-      char *idx_cursor = idx_data;
-      char *idx_end = idx_data + idx_size;
-      size_t line = 0;
-
-      /* skip header */
-      char *header_nl = memchr(idx_cursor, '\n', (size_t)(idx_end - idx_cursor));
-      idx_cursor = header_nl ? header_nl + 1 : idx_end;
-
-      while (idx_cursor < idx_end) {
-         char *line_nl = memchr(idx_cursor, '\n', (size_t)(idx_end - idx_cursor));
-         size_t len = line_nl ? (size_t)(line_nl - idx_cursor) : (size_t)(idx_end - idx_cursor);
-         if (mpi_size > 0 && (line % mpi_size) == (size_t)rank) {
-            if (job_count < MAX_JOBS)
-               job_array[job_count++] = g_strndup(idx_cursor, len);
-            else
-               fprintf(stderr, "rank %d: job_array full at line %zu, skipping\n", rank, line);
-         }
-         idx_cursor = line_nl ? line_nl + 1 : idx_end;
-         line++;
+      DIR *dir = opendir(options.input_path);
+      if (dir == NULL) {
+         perror("opendir");
+         g_free(options.input_path); g_free(options.nodes_map);
+         MPI_Finalize(); return EXIT_FAILURE;
       }
+
+      char **all_jobs = NULL;
+      size_t all_count = 0;
+      size_t all_capacity = 0;
+
+      struct dirent *ent;
+      while ((ent = readdir(dir)) != NULL) {
+         if (ent->d_name[0] == '.')
+            continue;
+
+         size_t base_len = strlen(options.input_path);
+         size_t name_len = strlen(ent->d_name);
+         bool needs_sep = base_len > 0 && options.input_path[base_len - 1] != '/';
+         size_t full_len = base_len + (needs_sep ? 1u : 0u) + name_len;
+
+         char *full_path = g_new(char, full_len + 1);
+         if (full_path == NULL) {
+            fprintf(stderr, "rank %d: out of memory building file paths\n", rank);
+            continue;
+         }
+
+         memcpy(full_path, options.input_path, base_len);
+         if (needs_sep)
+            full_path[base_len] = '/';
+         memcpy(full_path + base_len + (needs_sep ? 1u : 0u), ent->d_name, name_len + 1);
+
+         struct stat ent_st;
+         if (stat(full_path, &ent_st) != 0) {
+            perror("stat");
+            g_free(full_path);
+            continue;
+         }
+         if (!S_ISREG(ent_st.st_mode)) {
+            g_free(full_path);
+            continue;
+         }
+
+         if (all_count == all_capacity) {
+            size_t next_capacity = all_capacity ? all_capacity * 2u : 256u;
+            char **grown = g_realloc(all_jobs, next_capacity * sizeof(*all_jobs));
+            if (grown == NULL) {
+               fprintf(stderr, "rank %d: out of memory expanding file list\n", rank);
+               g_free(full_path);
+               break;
+            }
+            all_jobs = grown;
+            all_capacity = next_capacity;
+         }
+         all_jobs[all_count++] = full_path;
+      }
+      closedir(dir);
+
+      if (all_count > 1)
+         qsort(all_jobs, all_count, sizeof(*all_jobs), cmp_cstr_ptr);
+
+      for (size_t i = 0; i < all_count; i++) {
+         if (mpi_size > 0 && (i % mpi_size) == (size_t)rank) {
+            if (job_count < MAX_JOBS) {
+               job_array[job_count++] = all_jobs[i];
+            } else {
+               fprintf(stderr, "rank %d: job_array full at index %zu, skipping %s\n", rank, i, all_jobs[i]);
+               g_free(all_jobs[i]);
+            }
+         } else {
+            g_free(all_jobs[i]);
+         }
+      }
+
+      g_free(all_jobs);
    }
-   munmap(idx_data, idx_size);
 
    /* ── OMP parallel parse + aggregate + stream median values ──── */
    NodeAgg *thread_agg = g_new0(NodeAgg, n_threads);
