@@ -67,8 +67,8 @@ fi
 echo
 
 if command -v sacctmgr >/dev/null 2>&1; then
-    echo "--- User association limits ---"
-    assoc_cmd=(sacctmgr show assoc user="$user_name" format=User,Account,Partition,QOS,GrpJobs,GrpSubmit,MaxJobs,MaxSubmit,MaxTRESPU -Pn)
+    echo "--- User association limits (raw) ---"
+    assoc_cmd=(sacctmgr show assoc user="$user_name" -Pn)
     if [[ -n "$account_name" ]]; then
         assoc_cmd+=(account="$account_name")
     fi
@@ -77,12 +77,12 @@ if command -v sacctmgr >/dev/null 2>&1; then
     fi
     echo
 else
-    echo "--- User association limits ---"
+    echo "--- User association limits (raw) ---"
     echo "sacctmgr is not available on this system"
     echo
 fi
 
-echo "--- Relevant QOS records ---"
+echo "--- Relevant QOS records (raw) ---"
 if command -v sacctmgr >/dev/null 2>&1; then
     qos_list=$(scontrol show partition "$partition" 2>/dev/null | sed -n 's/.*QoS=\([^ ]*\).*/\1/p' | tr ',' ' ' || true)
     if [[ -n "$qos_list" ]]; then
@@ -91,7 +91,7 @@ if command -v sacctmgr >/dev/null 2>&1; then
                 continue
             fi
             echo "QOS: $qos_name"
-            if ! sacctmgr show qos name="$qos_name" format=Name,Priority,MaxJobsPerUser,MaxSubmitJobsPerUser,MaxWall,MaxTRESPU,GrpJobs,GrpSubmit,GrpTRES -Pn; then
+            if ! sacctmgr show qos name="$qos_name" -Pn; then
                 echo "Warning: could not read QOS $qos_name" >&2
             fi
             echo
