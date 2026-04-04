@@ -16,7 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define MAX_JOBS            4096
+#define MAX_JOBS            30000
 #define CSV_FIELD1_MAX      256
 #define AGG_TOP_N           10
 #define N_MEDIAN_FIELDS     3
