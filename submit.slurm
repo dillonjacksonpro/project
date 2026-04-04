@@ -13,7 +13,7 @@
 # Allocates SLURM resources and passes them to the main bash script
 #
 # Usage:
-#   sbatch submit.slurm [INPUT_FILE]
+#   sbatch -p <partition> submit.slurm [INPUT_FILE]
 #
 # The SLURM environment variables (SLURM_NNODES, SLURM_CPUS_PER_TASK, etc.)
 # are automatically passed to run_mpi_orch.sh
@@ -24,6 +24,8 @@ set -e
 
 # Get input file from argument or use default
 INPUT_FILE="${1:-input.txt}"
+
+echo "SLURM partition: ${SLURM_JOB_PARTITION:-unknown}"
 
 # Call the main runner script, passing argument and inheriting SLURM env vars
 ./run_mpi_orch.sh --input "$INPUT_FILE"

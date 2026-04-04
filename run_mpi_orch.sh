@@ -12,6 +12,7 @@
 #   -i, --input FILE         Input file to process (default: input.txt)
 #   -n, --nodes NUM          Number of nodes (default: from SLURM or 1)
 #   -t, --threads NUM        Max threads per node (default: from SLURM or 16)
+#   -p, --partition NAME     SLURM partition to target (default: current/default)
 #   -h, --help              Show this help message
 #
 # ============================================================================
@@ -26,6 +27,7 @@ INPUT_FILE="input.txt"
 NUM_NODES=${SLURM_NNODES:-1}
 MAX_THREADS_PER_NODE=${SLURM_CPUS_PER_TASK:-16}
 SLURM_NODELIST=${SLURM_NODELIST:-"localhost"}
+PARTITION=${SLURM_JOB_PARTITION:-""}
 
 # Required modules
 REQUIRED_MODULES=("intel/19.0" "intel-mkl/19.0" "impi")
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             MAX_THREADS_PER_NODE="$2"
             shift 2
             ;;
+        -p|--partition)
+            PARTITION="$2"
+            shift 2
+            ;;
         -h|--help)
             cat << 'EOF'
 MPI Orchestration Runner
@@ -55,23 +61,27 @@ MPI Orchestration Runner
 Usage: run_mpi_orch.sh [OPTIONS]
 
 Options:
-  -i, --input FILE       Input file to process (default: input.txt)
-  -n, --nodes NUM        Number of nodes (default: from SLURM or 1)
-  -t, --threads NUM      Max threads per node (default: from SLURM or 16)
-  -h, --help             Show this help message
+    -i, --input FILE       Input file to process (default: input.txt)
+    -n, --nodes NUM        Number of nodes (default: from SLURM or 1)
+    -t, --threads NUM      Max threads per node (default: from SLURM or 16)
+    -p, --partition NAME   SLURM partition to target (default: current/default)
+    -h, --help             Show this help message
 
 Examples:
-  # Use defaults
-  ./run_mpi_orch.sh
+    # Use defaults
+    ./run_mpi_orch.sh
 
-  # Custom input file
-  ./run_mpi_orch.sh -i mydata.txt
+    # Custom input file
+    ./run_mpi_orch.sh -i mydata.txt
 
-  # Simulate 4-node cluster with 8 threads each
-  ./run_mpi_orch.sh -i data.txt -n 4 -t 8
+    # Simulate 4-node cluster with 8 threads each
+    ./run_mpi_orch.sh -i data.txt -n 4 -t 8
 
-  # Via SLURM (automatic):
-  sbatch submit.slurm mydata.txt
+    # Force a specific partition
+    ./run_mpi_orch.sh -i data.txt -p compute
+
+    # Via SLURM (automatic):
+    sbatch -p compute submit.slurm mydata.txt
 
 EOF
             exit 0
@@ -198,6 +208,7 @@ echo "=========================================="
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Nodes: $NUM_NODES (max $MAX_THREADS_PER_NODE threads each)"
 echo "Node list: $SLURM_NODELIST"
+echo "Partition: ${PARTITION:-default}"
 echo "Input file: $INPUT_FILE"
 echo ""
 
@@ -241,7 +252,8 @@ echo "=========================================="
 echo ""
 
 # Launch MPI job
-srun --mpi=pmi2 \
+srun ${PARTITION:+--partition=$PARTITION} \
+    --mpi=pmi2 \
     --cpus-per-task=$MAX_THREADS_PER_NODE \
     --ntasks=$NUM_NODES \
     ./mpi_orch \
