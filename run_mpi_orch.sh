@@ -9,7 +9,7 @@
 #   ./run_mpi_orch.sh [OPTIONS]
 #
 # Options:
-#   -i, --input FILE         Input file to process (default: input.txt)
+#   -i, --input DIR          Input directory containing job CSV files (default: input)
 #   -n, --nodes NUM          Number of nodes (default: from SLURM or 1)
 #   -t, --threads NUM        Max threads per node (default: from SLURM or 16)
 #   -p, --partition NAME     SLURM partition to target (default: current/default)
@@ -23,14 +23,11 @@ set -e
 # Configuration - Defaults (can be overridden by args or SLURM env)
 # ============================================================================
 
-INPUT_FILE="input.txt"
+INPUT_FILE="input"
 NUM_NODES=${SLURM_NNODES:-1}
 MAX_THREADS_PER_NODE=${SLURM_CPUS_PER_TASK:-16}
 SLURM_NODELIST=${SLURM_NODELIST:-"localhost"}
 PARTITION=${SLURM_JOB_PARTITION:-""}
-
-# Required modules
-REQUIRED_MODULES=("intel/19.0" "intel-mkl/19.0" "impi")
 
 # ============================================================================
 # Parse command-line arguments
@@ -61,7 +58,7 @@ MPI Orchestration Runner
 Usage: run_mpi_orch.sh [OPTIONS]
 
 Options:
-    -i, --input FILE       Input file to process (default: input.txt)
+    -i, --input DIR        Input directory containing job CSV files (default: input)
     -n, --nodes NUM        Number of nodes (default: from SLURM or 1)
     -t, --threads NUM      Max threads per node (default: from SLURM or 16)
     -p, --partition NAME   SLURM partition to target (default: current/default)
@@ -71,17 +68,17 @@ Examples:
     # Use defaults
     ./run_mpi_orch.sh
 
-    # Custom input file
-    ./run_mpi_orch.sh -i mydata.txt
+    # Custom input directory
+    ./run_mpi_orch.sh -i /path/to/jobs_dir
 
     # Simulate 4-node cluster with 8 threads each
-    ./run_mpi_orch.sh -i data.txt -n 4 -t 8
+    ./run_mpi_orch.sh -i /path/to/jobs_dir -n 4 -t 8
 
     # Force a specific partition
-    ./run_mpi_orch.sh -i data.txt -p compute
+    ./run_mpi_orch.sh -i /path/to/jobs_dir -p compute
 
     # Via SLURM (automatic):
-    sbatch -p compute submit.slurm mydata.txt
+    sbatch -p compute submit.slurm /path/to/jobs_dir
 
 EOF
             exit 0
@@ -93,34 +90,6 @@ EOF
             ;;
     esac
 done
-
-# ============================================================================
-# Function: Check and load modules
-# ============================================================================
-
-check_and_load_modules() {
-    local module_list=("$@")
-    
-    echo "=========================================="
-    echo "Checking and loading required modules..."
-    echo "=========================================="
-    
-    for module in "${module_list[@]}"; do
-        if module avail "$module" &>/dev/null; then
-            echo "✓ Loading module: $module"
-            module load "$module" 2>/dev/null || {
-                echo "  ⚠ Warning: Failed to load $module"
-            }
-        else
-            echo "✗ Module not available: $module"
-        fi
-    done
-    
-    echo ""
-    echo "Currently loaded modules:"
-    module list 2>&1 | grep -v "^$" || echo "  (none)"
-    echo ""
-}
 
 # ============================================================================
 # Function: Build node-to-cores mapping
@@ -179,23 +148,28 @@ build_node_map() {
 }
 
 # ============================================================================
-# Function: Validate input file
+# Function: Validate input directory
 # ============================================================================
 
 validate_input_file() {
     local file="$1"
-    
-    if [[ ! -f "$file" ]]; then
-        echo "Error: Input file not found: $file" >&2
+
+    if [[ ! -e "$file" ]]; then
+        echo "Error: Input path not found: $file" >&2
         exit 1
     fi
-    
-    if [[ ! -r "$file" ]]; then
-        echo "Error: Input file is not readable: $file" >&2
+
+    if [[ ! -d "$file" ]]; then
+        echo "Error: Input path is not a directory: $file" >&2
         exit 1
     fi
-    
-    echo "✓ Input file validated: $file"
+
+    if [[ ! -r "$file" || ! -x "$file" ]]; then
+        echo "Error: Input directory is not accessible (need read+execute): $file" >&2
+        exit 1
+    fi
+
+    echo "✓ Input directory validated: $file"
 }
 
 # ============================================================================
@@ -209,13 +183,10 @@ echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Nodes: $NUM_NODES (max $MAX_THREADS_PER_NODE threads each)"
 echo "Node list: $SLURM_NODELIST"
 echo "Partition: ${PARTITION:-default}"
-echo "Input file: $INPUT_FILE"
+echo "Input path: $INPUT_FILE"
 echo ""
 
-# Check and load required modules
-check_and_load_modules "${REQUIRED_MODULES[@]}"
-
-# Validate input file
+# Validate input directory
 validate_input_file "$INPUT_FILE"
 
 # Build node-to-cores mapping
