@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=mpi_orch
 #SBATCH --partition=rss-class
-#SBATCH --nodes=8
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=4
 #SBATCH --time=00:10:00
 #SBATCH --output=mpi_orch_%j.out
 #SBATCH --error=mpi_orch_%j.err
