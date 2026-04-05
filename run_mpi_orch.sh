@@ -254,7 +254,7 @@ echo ""
 if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     env -u SLURM_MEM_PER_CPU -u SLURM_MEM_PER_NODE -u SLURM_MEM_PER_GPU \
     srun --mpi=pmi2 \
-        ./mpi_orch \
+        ./build/bin/mpi_orch \
         --input "$INPUT_FILE" \
         --nodes "$NODE_MAP" \
         --threads "$MAX_THREADS_PER_NODE"
@@ -264,7 +264,7 @@ else
         --mpi=pmi2 \
         --cpus-per-task=$MAX_THREADS_PER_NODE \
         --ntasks=$NUM_NODES \
-        ./mpi_orch \
+        ./build/bin/mpi_orch \
         --input "$INPUT_FILE" \
         --nodes "$NODE_MAP" \
         --threads "$MAX_THREADS_PER_NODE"

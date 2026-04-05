@@ -1,22 +1,37 @@
 SHELL := /bin/bash
 
+SRC_DIR := src
+BUILD_DIR := build
+BIN_DIR := $(BUILD_DIR)/bin
+TEST_BIN_DIR := $(BUILD_DIR)/tests/bin
+TARGET := mpi_orch
+
 CC := mpicc
 CXX := g++
 MPICXX := mpicxx
-TARGET := mpi_orch
-SRC := mpi_orch.c glib_compat.c orch_common.c aggregation.c median.c csv_parse.c options.c file_discovery.c fatal.c comm_queue.c mpi_workers.c
 
+SRC := \
+	$(SRC_DIR)/mpi_orch.c \
+	$(SRC_DIR)/glib_compat.c \
+	$(SRC_DIR)/orch_common.c \
+	$(SRC_DIR)/aggregation.c \
+	$(SRC_DIR)/median.c \
+	$(SRC_DIR)/csv_parse.c \
+	$(SRC_DIR)/options.c \
+	$(SRC_DIR)/file_discovery.c \
+	$(SRC_DIR)/fatal.c \
+	$(SRC_DIR)/comm_queue.c \
+	$(SRC_DIR)/mpi_workers.c
 
 CFLAGS := -std=c11 -O0 -g3 -fno-omit-frame-pointer -pipe \
           -Wall -Wextra -Wpedantic -Wformat=2 -Wshadow \
           -Wstrict-prototypes -Wmissing-prototypes -Wwrite-strings \
           -Wconversion -Wsign-conversion -Wvla \
-          -fopenmp
+          -fopenmp -I$(SRC_DIR)
 
-CXXFLAGS := -std=c++17 -O0 -g3 -Wall -Wextra -Wpedantic -I.
+CXXFLAGS := -std=c++17 -O0 -g3 -Wall -Wextra -Wpedantic -I$(SRC_DIR)
 TEST_CXXFLAGS := $(CXXFLAGS) -Wno-missing-field-initializers
 
-TEST_BIN_DIR := tests/bin
 TEST_TARGETS := \
 	$(TEST_BIN_DIR)/test_aggregation \
 	$(TEST_BIN_DIR)/test_median \
@@ -29,10 +44,11 @@ TEST_TARGETS := \
 
 .PHONY: all clean test
 
-all: $(TARGET)
+all: $(BIN_DIR)/$(TARGET)
 
-$(TARGET): $(SRC)
+$(BIN_DIR)/$(TARGET): $(SRC)
 	@set -euo pipefail; \
+	mkdir -p $(BIN_DIR); \
 	missing=0; \
 	if ! command -v gcc >/dev/null 2>&1; then \
 		echo "Missing build tool: gcc"; \
@@ -52,12 +68,12 @@ $(TARGET): $(SRC)
 	$(CC) -D_GNU_SOURCE $(CFLAGS) $(SRC) -o $@
 
 clean:
-	rm -f $(TARGET) $(TEST_TARGETS) $(TEST_BIN_DIR)/*.o
+	rm -rf $(BUILD_DIR) mpi_orch
 
 $(TEST_BIN_DIR):
 	mkdir -p $(TEST_BIN_DIR)
 
-$(TEST_BIN_DIR)/test_aggregation: tests/test_aggregation.cpp aggregation.c orch_common.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_aggregation: tests/test_aggregation.cpp $(SRC_DIR)/aggregation.c $(SRC_DIR)/orch_common.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if pkg-config --exists gtest gtest_main; then \
 		GTEST_FLAGS="$$(pkg-config --cflags --libs gtest gtest_main)"; \
@@ -67,11 +83,11 @@ $(TEST_BIN_DIR)/test_aggregation: tests/test_aggregation.cpp aggregation.c orch_
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c aggregation.c -o $(TEST_BIN_DIR)/aggregation.o; \
-	$(CC) -std=c11 -I. -c orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/aggregation.c -o $(TEST_BIN_DIR)/aggregation.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
 	$(CXX) $(TEST_CXXFLAGS) tests/test_aggregation.cpp $(TEST_BIN_DIR)/aggregation.o $(TEST_BIN_DIR)/orch_common.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_median: tests/test_median.cpp median.c glib_compat.c orch_common.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_median: tests/test_median.cpp $(SRC_DIR)/median.c $(SRC_DIR)/glib_compat.c $(SRC_DIR)/orch_common.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if pkg-config --exists gtest gtest_main; then \
 		GTEST_FLAGS="$$(pkg-config --cflags --libs gtest gtest_main)"; \
@@ -81,12 +97,12 @@ $(TEST_BIN_DIR)/test_median: tests/test_median.cpp median.c glib_compat.c orch_c
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c median.c -o $(TEST_BIN_DIR)/median.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
-	$(CC) -std=c11 -I. -c orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/median.c -o $(TEST_BIN_DIR)/median.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
 	$(CXX) $(TEST_CXXFLAGS) tests/test_median.cpp $(TEST_BIN_DIR)/median.o $(TEST_BIN_DIR)/glib_compat.o $(TEST_BIN_DIR)/orch_common.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_csv_parse: tests/test_csv_parse.cpp csv_parse.c glib_compat.c orch_common.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_csv_parse: tests/test_csv_parse.cpp $(SRC_DIR)/csv_parse.c $(SRC_DIR)/glib_compat.c $(SRC_DIR)/orch_common.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if pkg-config --exists gtest gtest_main; then \
 		GTEST_FLAGS="$$(pkg-config --cflags --libs gtest gtest_main)"; \
@@ -96,12 +112,12 @@ $(TEST_BIN_DIR)/test_csv_parse: tests/test_csv_parse.cpp csv_parse.c glib_compat
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c csv_parse.c -o $(TEST_BIN_DIR)/csv_parse.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
-	$(CC) -std=c11 -I. -c orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/csv_parse.c -o $(TEST_BIN_DIR)/csv_parse.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
 	$(CXX) $(TEST_CXXFLAGS) tests/test_csv_parse.cpp $(TEST_BIN_DIR)/csv_parse.o $(TEST_BIN_DIR)/glib_compat.o $(TEST_BIN_DIR)/orch_common.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_options: tests/test_options.cpp options.c glib_compat.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_options: tests/test_options.cpp $(SRC_DIR)/options.c $(SRC_DIR)/glib_compat.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if pkg-config --exists gtest gtest_main; then \
 		GTEST_FLAGS="$$(pkg-config --cflags --libs gtest gtest_main)"; \
@@ -111,11 +127,11 @@ $(TEST_BIN_DIR)/test_options: tests/test_options.cpp options.c glib_compat.c | $
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c options.c -o $(TEST_BIN_DIR)/options.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/options.c -o $(TEST_BIN_DIR)/options.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
 	$(CXX) $(TEST_CXXFLAGS) tests/test_options.cpp $(TEST_BIN_DIR)/options.o $(TEST_BIN_DIR)/glib_compat.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_file_discovery: tests/test_file_discovery.cpp file_discovery.c csv_parse.c glib_compat.c orch_common.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_file_discovery: tests/test_file_discovery.cpp $(SRC_DIR)/file_discovery.c $(SRC_DIR)/csv_parse.c $(SRC_DIR)/glib_compat.c $(SRC_DIR)/orch_common.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if pkg-config --exists gtest gtest_main; then \
 		GTEST_FLAGS="$$(pkg-config --cflags --libs gtest gtest_main)"; \
@@ -125,13 +141,13 @@ $(TEST_BIN_DIR)/test_file_discovery: tests/test_file_discovery.cpp file_discover
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c file_discovery.c -o $(TEST_BIN_DIR)/file_discovery.o; \
-	$(CC) -std=c11 -I. -c csv_parse.c -o $(TEST_BIN_DIR)/csv_parse.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
-	$(CC) -std=c11 -I. -c orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/file_discovery.c -o $(TEST_BIN_DIR)/file_discovery.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/csv_parse.c -o $(TEST_BIN_DIR)/csv_parse.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
 	$(CXX) $(TEST_CXXFLAGS) tests/test_file_discovery.cpp $(TEST_BIN_DIR)/file_discovery.o $(TEST_BIN_DIR)/csv_parse.o $(TEST_BIN_DIR)/glib_compat.o $(TEST_BIN_DIR)/orch_common.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_fatal: tests/test_fatal.cpp fatal.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_fatal: tests/test_fatal.cpp $(SRC_DIR)/fatal.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if ! command -v $(MPICXX) >/dev/null 2>&1; then \
 		echo "mpicxx not found, skipping $@"; \
@@ -145,10 +161,10 @@ $(TEST_BIN_DIR)/test_fatal: tests/test_fatal.cpp fatal.c | $(TEST_BIN_DIR)
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
 	$(MPICXX) $(TEST_CXXFLAGS) tests/test_fatal.cpp $(TEST_BIN_DIR)/fatal.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_comm_queue: tests/test_comm_queue.cpp comm_queue.c fatal.c glib_compat.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_comm_queue: tests/test_comm_queue.cpp $(SRC_DIR)/comm_queue.c $(SRC_DIR)/fatal.c $(SRC_DIR)/glib_compat.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if ! command -v $(MPICXX) >/dev/null 2>&1; then \
 		echo "mpicxx not found, skipping $@"; \
@@ -162,12 +178,12 @@ $(TEST_BIN_DIR)/test_comm_queue: tests/test_comm_queue.cpp comm_queue.c fatal.c 
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c comm_queue.c -o $(TEST_BIN_DIR)/comm_queue.o; \
-	$(CC) -std=c11 -I. -c fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/comm_queue.c -o $(TEST_BIN_DIR)/comm_queue.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
 	$(MPICXX) $(TEST_CXXFLAGS) tests/test_comm_queue.cpp $(TEST_BIN_DIR)/comm_queue.o $(TEST_BIN_DIR)/fatal.o $(TEST_BIN_DIR)/glib_compat.o $$GTEST_FLAGS -pthread -o $@
 
-$(TEST_BIN_DIR)/test_mpi_workers: tests/test_mpi_workers.cpp mpi_workers.c comm_queue.c fatal.c glib_compat.c orch_common.c | $(TEST_BIN_DIR)
+$(TEST_BIN_DIR)/test_mpi_workers: tests/test_mpi_workers.cpp $(SRC_DIR)/mpi_workers.c $(SRC_DIR)/comm_queue.c $(SRC_DIR)/fatal.c $(SRC_DIR)/glib_compat.c $(SRC_DIR)/orch_common.c | $(TEST_BIN_DIR)
 	@set -euo pipefail; \
 	if ! command -v $(MPICXX) >/dev/null 2>&1; then \
 		echo "mpicxx not found, skipping $@"; \
@@ -181,11 +197,11 @@ $(TEST_BIN_DIR)/test_mpi_workers: tests/test_mpi_workers.cpp mpi_workers.c comm_
 		echo "GoogleTest not found, skipping $@"; \
 		exit 0; \
 	fi; \
-	$(CC) -std=c11 -I. -c mpi_workers.c -o $(TEST_BIN_DIR)/mpi_workers.o; \
-	$(CC) -std=c11 -I. -c comm_queue.c -o $(TEST_BIN_DIR)/comm_queue.o; \
-	$(CC) -std=c11 -I. -c fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
-	$(CC) -std=c11 -I. -c glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
-	$(CC) -std=c11 -I. -c orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/mpi_workers.c -o $(TEST_BIN_DIR)/mpi_workers.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/comm_queue.c -o $(TEST_BIN_DIR)/comm_queue.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/fatal.c -o $(TEST_BIN_DIR)/fatal.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/glib_compat.c -o $(TEST_BIN_DIR)/glib_compat.o; \
+	$(CC) -std=c11 -I$(SRC_DIR) -c $(SRC_DIR)/orch_common.c -o $(TEST_BIN_DIR)/orch_common.o; \
 	$(MPICXX) $(TEST_CXXFLAGS) tests/test_mpi_workers.cpp $(TEST_BIN_DIR)/mpi_workers.o $(TEST_BIN_DIR)/comm_queue.o $(TEST_BIN_DIR)/fatal.o $(TEST_BIN_DIR)/glib_compat.o $(TEST_BIN_DIR)/orch_common.o $$GTEST_FLAGS -pthread -o $@
 
 test: $(TEST_TARGETS)

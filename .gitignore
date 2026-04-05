@@ -1,6 +1,7 @@
 # ------------------------------
 # Project binaries and build outputs
 # ------------------------------
+build/
 mpi_orch
 mpi_orch_asan
 mpi_arch
