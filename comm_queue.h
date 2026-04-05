@@ -1,6 +1,7 @@
 #ifndef COMM_QUEUE_H
 #define COMM_QUEUE_H
 
+#include <pthread.h>
 #include <stddef.h>
 
 #include "orch_common.h"
@@ -26,10 +27,14 @@ typedef struct {
 } SendBatch;
 
 typedef struct {
-   ORCH_ATOMIC(CommNode *) head;
-   CommNode           *tail;
-   CommNode            stub;
-   ORCH_ATOMIC(bool)   producers_done;
+   CommNode         *head;
+   CommNode         *tail;
+   size_t            depth;
+   size_t            max_depth;
+   bool              producers_done;
+   pthread_mutex_t   mutex;
+   pthread_cond_t    not_empty;
+   pthread_cond_t    not_full;
 } CommQueue;
 
 typedef struct {
@@ -38,8 +43,11 @@ typedef struct {
 } StageBuf;
 
 void comm_queue_init(CommQueue *q);
+void comm_queue_destroy(CommQueue *q);
 void comm_queue_push(CommQueue *q, CommNode *node);
 CommNode *comm_queue_pop(CommQueue *q);
+CommNode *comm_queue_pop_wait(CommQueue *q);
+void comm_queue_mark_done(CommQueue *q);
 
 void stage_buf_flush(StageBuf *buf, FieldIndex field_idx, MpiRank dest_rank, CommQueue *q);
 void stage_buf_append(StageBuf *buf, MedianValue val,

@@ -16,8 +16,6 @@
 #include <mpi.h>
 #include <omp.h>
 #include <pthread.h>
-#include <sched.h>
-#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,22 +84,43 @@ int main(int argc, char *argv[])
    hostname[sizeof(hostname) - 1] = '\0';
    printf("Rank %d/%zu on %s\n", rank, mpi_size, hostname);
 
-   /* subtract 1 core for the dedicated comms thread */
-   int avail_cores = options.max_threads > 0 ? options.max_threads : omp_get_max_threads();
-   size_t n_threads = (size_t)(avail_cores > 1 ? avail_cores - 1 : 1);
-   if (n_threads > (size_t)INT_MAX)
-      fatal_rank(rank, "thread count too large for OpenMP runtime");
-
    /* ── determine median receiver rank for each field ───────────── */
    MpiRank dest_ranks[N_MEDIAN_FIELDS];
    for (FieldIndex fi = 0; fi < N_MEDIAN_FIELDS; fi++)
       dest_ranks[fi] = median_receiver(fi, mpi_size);
 
+   /* subtract comms + receiver threads from parser budget */
+   int avail_cores = options.max_threads > 0 ? options.max_threads : omp_get_max_threads();
+
+   size_t n_recv_threads = 0;
+   for (FieldIndex fi = 0; fi < N_MEDIAN_FIELDS; fi++)
+      if (dest_ranks[fi] == rank)
+         n_recv_threads++;
+
+   int reserved = 1 + (int)n_recv_threads;
+   int parser_threads = avail_cores - reserved;
+   size_t n_threads = (size_t)(parser_threads > 0 ? parser_threads : 1);
+   if (n_threads > (size_t)INT_MAX)
+      fatal_rank(rank, "thread count too large for OpenMP runtime");
+
+   printf("Rank %d thread budget: avail=%d comms=1 receivers=%zu omp=%zu\n",
+          rank, avail_cores, n_recv_threads, n_threads);
+
+   /* ── scan input directory and stripe paths across ranks ──────── */
+   char  *job_array[MAX_JOBS];
+   size_t job_count = 0;
+
+   if (!discover_rank_jobs(options.input_path, rank, mpi_size, job_array, &job_count)) {
+      options_free(&options);
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+      return EXIT_FAILURE;
+   }
+
    /* ── launch receiver thread(s) for fields this rank owns ─────── */
    RecvThreadArgs recv_args[N_MEDIAN_FIELDS];
    pthread_t      recv_threads[N_MEDIAN_FIELDS];
    FieldIndex     recv_field_map[N_MEDIAN_FIELDS]; /* recv_threads[i] handles field recv_field_map[i] */
-   size_t         n_recv_threads = 0;
+   n_recv_threads = 0;
 
    for (FieldIndex fi = 0; fi < N_MEDIAN_FIELDS; fi++) {
       if (dest_ranks[fi] != rank) continue;
@@ -135,16 +154,6 @@ int main(int argc, char *argv[])
 
    if (pthread_create(&comms_thread, NULL, comms_thread_func, &comms_args) != 0)
       fatal_rank_errno(rank, "pthread_create(comms)");
-
-   /* ── scan input directory and stripe paths across ranks ──────── */
-   char  *job_array[MAX_JOBS];
-   size_t job_count = 0;
-
-   if (!discover_rank_jobs(options.input_path, rank, mpi_size, job_array, &job_count)) {
-      options_free(&options);
-      (void)MPI_Finalize();
-      return EXIT_FAILURE;
-   }
 
    /* ── OMP parallel parse + aggregate + stream median values ──── */
    NodeAgg *thread_agg = g_new0(NodeAgg, n_threads);
@@ -229,7 +238,7 @@ int main(int argc, char *argv[])
    } /* implicit OMP barrier — all parse threads done, all items in queue */
 
    /* signal comms thread: no more producers */
-   atomic_store_explicit(&queue->producers_done, true, memory_order_release);
+   comm_queue_mark_done(queue);
    if (pthread_join(comms_thread, NULL) != 0)
       fatal_rank_errno(rank, "pthread_join(comms)"); /* all MPI_Sends complete */
 
@@ -260,6 +269,7 @@ int main(int argc, char *argv[])
    }
 
    g_free(thread_agg);
+   comm_queue_destroy(queue);
    g_free(queue);
 
    /* ── gather to root ──────────────────────────────────────────── */

@@ -9,49 +9,123 @@
 void
 comm_queue_init(CommQueue *q)
 {
-   atomic_init(&q->stub.next, NULL);
-   atomic_init(&q->head, &q->stub);
-   q->tail = &q->stub;
-   atomic_init(&q->producers_done, false);
+   q->head = NULL;
+   q->tail = NULL;
+   q->depth = 0;
+   q->max_depth = COMM_QUEUE_MAX_DEPTH;
+   q->producers_done = false;
+   if (pthread_mutex_init(&q->mutex, NULL) != 0)
+      fatal_no_mpi("pthread_mutex_init(comm queue)");
+   if (pthread_cond_init(&q->not_empty, NULL) != 0)
+      fatal_no_mpi("pthread_cond_init(comm queue not_empty)");
+   if (pthread_cond_init(&q->not_full, NULL) != 0)
+      fatal_no_mpi("pthread_cond_init(comm queue not_full)");
+}
+
+void
+comm_queue_destroy(CommQueue *q)
+{
+   if (pthread_cond_destroy(&q->not_full) != 0)
+      fatal_no_mpi("pthread_cond_destroy(comm queue not_full)");
+   if (pthread_cond_destroy(&q->not_empty) != 0)
+      fatal_no_mpi("pthread_cond_destroy(comm queue not_empty)");
+   if (pthread_mutex_destroy(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_destroy(comm queue)");
 }
 
 void
 comm_queue_push(CommQueue *q, CommNode *node)
 {
+   if (pthread_mutex_lock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_lock(comm queue push)");
+
+   while (q->depth >= q->max_depth && !q->producers_done) {
+      if (pthread_cond_wait(&q->not_full, &q->mutex) != 0)
+         fatal_no_mpi("pthread_cond_wait(comm queue not_full)");
+   }
+
    atomic_store_explicit(&node->next, NULL, memory_order_relaxed);
-   CommNode *prev = atomic_exchange_explicit(&q->head, node, memory_order_acq_rel);
-   atomic_store_explicit(&prev->next, node, memory_order_release);
+   if (q->tail != NULL) {
+      atomic_store_explicit(&q->tail->next, node, memory_order_release);
+   } else {
+      q->head = node;
+   }
+   q->tail = node;
+   q->depth++;
+
+   if (pthread_cond_signal(&q->not_empty) != 0)
+      fatal_no_mpi("pthread_cond_signal(comm queue not_empty)");
+   if (pthread_mutex_unlock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_unlock(comm queue push)");
 }
 
 CommNode *
 comm_queue_pop(CommQueue *q)
 {
-   CommNode *tail = q->tail;
-   CommNode *next = atomic_load_explicit(&tail->next, memory_order_acquire);
+   if (pthread_mutex_lock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_lock(comm queue pop)");
 
-   if (tail == &q->stub) {
-      if (next == NULL)
-         return NULL;
-      q->tail = next;
-      tail = next;
-      next = atomic_load_explicit(&tail->next, memory_order_acquire);
-   }
-   if (next != NULL) {
-      q->tail = next;
-      return tail;
-   }
-
-   CommNode *head = atomic_load_explicit(&q->head, memory_order_acquire);
-   if (tail != head)
+   if (q->head == NULL) {
+      if (pthread_mutex_unlock(&q->mutex) != 0)
+         fatal_no_mpi("pthread_mutex_unlock(comm queue pop empty)");
       return NULL;
-
-   comm_queue_push(q, &q->stub);
-   next = atomic_load_explicit(&tail->next, memory_order_acquire);
-   if (next != NULL) {
-      q->tail = next;
-      return tail;
    }
-   return NULL;
+
+   CommNode *node = q->head;
+   q->head = atomic_load_explicit(&node->next, memory_order_acquire);
+   if (q->head == NULL)
+      q->tail = NULL;
+   q->depth--;
+
+   if (pthread_cond_signal(&q->not_full) != 0)
+      fatal_no_mpi("pthread_cond_signal(comm queue not_full)");
+   if (pthread_mutex_unlock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_unlock(comm queue pop)");
+   return node;
+}
+
+CommNode *
+comm_queue_pop_wait(CommQueue *q)
+{
+   if (pthread_mutex_lock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_lock(comm queue pop_wait)");
+
+   while (q->head == NULL && !q->producers_done) {
+      if (pthread_cond_wait(&q->not_empty, &q->mutex) != 0)
+         fatal_no_mpi("pthread_cond_wait(comm queue not_empty)");
+   }
+
+   if (q->head == NULL && q->producers_done) {
+      if (pthread_mutex_unlock(&q->mutex) != 0)
+         fatal_no_mpi("pthread_mutex_unlock(comm queue pop_wait done)");
+      return NULL;
+   }
+
+   CommNode *node = q->head;
+   q->head = atomic_load_explicit(&node->next, memory_order_acquire);
+   if (q->head == NULL)
+      q->tail = NULL;
+   q->depth--;
+
+   if (pthread_cond_signal(&q->not_full) != 0)
+      fatal_no_mpi("pthread_cond_signal(comm queue not_full)");
+   if (pthread_mutex_unlock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_unlock(comm queue pop_wait)");
+   return node;
+}
+
+void
+comm_queue_mark_done(CommQueue *q)
+{
+   if (pthread_mutex_lock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_lock(comm queue mark_done)");
+   q->producers_done = true;
+   if (pthread_cond_broadcast(&q->not_empty) != 0)
+      fatal_no_mpi("pthread_cond_broadcast(comm queue not_empty)");
+   if (pthread_cond_broadcast(&q->not_full) != 0)
+      fatal_no_mpi("pthread_cond_broadcast(comm queue not_full)");
+   if (pthread_mutex_unlock(&q->mutex) != 0)
+      fatal_no_mpi("pthread_mutex_unlock(comm queue mark_done)");
 }
 
 void

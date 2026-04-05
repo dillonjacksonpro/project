@@ -15,6 +15,12 @@
    the comms queue. */
 #define MEDIAN_SEND_BUFFER_SIZE 4096
 
+/* Maximum queued send batches before producer threads block. */
+#define COMM_QUEUE_MAX_DEPTH 128
+
+/* Hard cap for values retained by a single median receiver thread. */
+#define MAX_RECEIVER_VALUES ((size_t)1 << 30)
+
 /* MPI tags — one per median field; zero-length message on same tag = "done" */
 #define TAG_MEDIAN_F0  100
 #define TAG_MEDIAN_F1  101
