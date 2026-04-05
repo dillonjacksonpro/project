@@ -23,7 +23,10 @@
 
 set -e
 
-if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+EXPECTED_JOB_NAME="mpi_orch"
+
+if [[ -z "${SLURM_JOB_ID:-}" || "${SLURM_JOB_NAME:-}" != "$EXPECTED_JOB_NAME" ]]; then
+	echo "submit.slurm: submitting fresh batch job allocation"
 	exec sbatch "$0" "$@"
 fi
 
