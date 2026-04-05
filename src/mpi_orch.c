@@ -9,6 +9,7 @@
 #include "fatal.h"
 #include "file_discovery.h"
 #include "median.h"
+#include "logging.h"
 #include "mpi_workers.h"
 #include "options.h"
 #include "orch_common.h"
@@ -83,6 +84,7 @@ int main(int argc, char *argv[])
       g_strlcpy(hostname, "unknown-host", sizeof(hostname));
    hostname[sizeof(hostname) - 1] = '\0';
    printf("Rank %d/%zu on %s\n", rank, mpi_size, hostname);
+   ORCH_LOG(rank, "startup", "mpi initialized on %s with world size %zu", hostname, mpi_size);
 
    /* ── determine median receiver rank for each field ───────────── */
    MpiRank dest_ranks[N_MEDIAN_FIELDS];
@@ -105,6 +107,8 @@ int main(int argc, char *argv[])
 
    printf("Rank %d thread budget: avail=%d comms=1 receivers=%zu omp=%zu\n",
           rank, avail_cores, n_recv_threads, n_threads);
+   ORCH_LOG(rank, "startup", "thread budget avail=%d receivers=%zu parser_threads=%zu",
+            avail_cores, n_recv_threads, n_threads);
 
    /* ── scan input directory and stripe paths across ranks ──────── */
    char  *job_array[MAX_JOBS];
@@ -115,6 +119,7 @@ int main(int argc, char *argv[])
       MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
       return EXIT_FAILURE;
    }
+   ORCH_LOG(rank, "discovery", "rank owns %zu jobs from %s", job_count, options.input_path);
 
    /* ── launch receiver thread(s) for fields this rank owns ─────── */
    RecvThreadArgs recv_args[N_MEDIAN_FIELDS];
@@ -136,6 +141,7 @@ int main(int argc, char *argv[])
       recv_field_map[n_recv_threads] = fi;
       if (pthread_create(&recv_threads[n_recv_threads], NULL, recv_thread_func, a) != 0)
          fatal_rank_errno(rank, "pthread_create(receiver)");
+      ORCH_LOG(rank, "worker", "launched receiver thread for field %d on tag %d", fi, a->tag);
       n_recv_threads++;
    }
 
@@ -154,17 +160,21 @@ int main(int argc, char *argv[])
 
    if (pthread_create(&comms_thread, NULL, comms_thread_func, &comms_args) != 0)
       fatal_rank_errno(rank, "pthread_create(comms)");
+   ORCH_LOG(rank, "worker", "launched comms thread with queue depth %zu", queue->max_depth);
 
    /* ── OMP parallel parse + aggregate + stream median values ──── */
    NodeAgg *thread_agg = g_new0(NodeAgg, n_threads);
    if (thread_agg == NULL)
       fatal_rank(rank, "out of memory allocating thread aggregators");
 
+   const size_t parse_log_stride = 65536u;
+
    #pragma omp parallel num_threads((int)n_threads)
    {
       size_t thread_count = (size_t)omp_get_num_threads();
       size_t thread_id    = (size_t)omp_get_thread_num();
       NodeAgg *my_agg       = &thread_agg[thread_id];
+      size_t parsed_rows = 0;
 
       /* 3 staging buffers, one per median field — heap to avoid large stack frames */
       StageBuf *stage = g_new0(StageBuf, N_MEDIAN_FIELDS);
@@ -175,7 +185,11 @@ int main(int argc, char *argv[])
       size_t start      = (size_t)thread_id * chunk_size;
       size_t end_job    = start + chunk_size < job_count ? start + chunk_size : job_count;
 
+      ORCH_LOG_THREAD(rank, thread_id, "parse", "starting with %zu assigned jobs", end_job - start);
+
       for (size_t i = start; i < end_job; i++) {
+         size_t file_rows = 0;
+         ORCH_LOG_THREAD(rank, thread_id, "parse", "opening %s", job_array[i]);
          int job_fd = open(job_array[i], O_RDONLY);
          if (job_fd < 0) { perror("open"); g_free(job_array[i]); continue; }
 
@@ -194,6 +208,7 @@ int main(int argc, char *argv[])
          if (file_data == MAP_FAILED)  { perror("mmap"); close(job_fd); g_free(job_array[i]); continue; }
          close(job_fd);
          madvise(file_data, file_size, MADV_SEQUENTIAL);
+         ORCH_LOG_THREAD(rank, thread_id, "parse", "mapped %s (%zu bytes)", job_array[i], file_size);
 
          char *cursor = file_data;
          char *file_end = file_data + file_size;
@@ -217,39 +232,55 @@ int main(int argc, char *argv[])
 
             if (parse_csv_row_line(cursor, line_len, &row)) {
                node_agg_update(my_agg, &row);
+               file_rows++;
+               parsed_rows++;
 
                /* stream each field value to its median receiver via comms thread */
                stage_buf_append(&stage[0], row.field2, 0, dest_ranks[0], queue);
                stage_buf_append(&stage[1], row.field3, 1, dest_ranks[1], queue);
                stage_buf_append(&stage[2], row.field4, 2, dest_ranks[2], queue);
+
+               if (parse_log_stride > 0 && (file_rows % parse_log_stride) == 0) {
+                  ORCH_LOG_THREAD(rank, thread_id, "parse",
+                                  "%s parsed %zu rows (%zu rows total)",
+                                  job_array[i], file_rows, parsed_rows);
+               }
             }
             cursor = next;
          }
 
          munmap(file_data, file_size);
+         ORCH_LOG_THREAD(rank, thread_id, "parse", "completed %s with %zu parsed rows", job_array[i], file_rows);
          g_free(job_array[i]);
       }
 
       /* flush any partial staging buffers before this thread exits */
       for (FieldIndex fi = 0; fi < N_MEDIAN_FIELDS; fi++)
          stage_buf_flush(&stage[fi], fi, dest_ranks[fi], queue);
+      ORCH_LOG_THREAD(rank, thread_id, "queue", "flushed final staging buffers");
       g_free(stage);
 
    } /* implicit OMP barrier — all parse threads done, all items in queue */
+   ORCH_LOG(rank, "parse", "all parse threads complete; marking queue done");
 
    /* signal comms thread: no more producers */
    comm_queue_mark_done(queue);
    if (pthread_join(comms_thread, NULL) != 0)
       fatal_rank_errno(rank, "pthread_join(comms)"); /* all MPI_Sends complete */
+   ORCH_LOG(rank, "worker", "comms thread drained and joined");
 
    /* node-level aggregation */
    for (size_t t = 1; t < n_threads; t++)
       node_agg_merge(&thread_agg[0], &thread_agg[t]);
+   ORCH_LOG(rank, "aggregate", "merged %zu thread aggregates", n_threads);
 
    /* wait for receiver threads — SOAs are complete after join */
    for (size_t i = 0; i < n_recv_threads; i++)
       if (pthread_join(recv_threads[i], NULL) != 0)
          fatal_rank_errno(rank, "pthread_join(receiver)");
+      else
+         ORCH_LOG(rank, "worker", "receiver thread for field %d joined after %zu values",
+                  recv_field_map[i], recv_args[i].soa.count);
 
    /* compute medians for fields this rank received */
    MedianValue my_medians[N_MEDIAN_FIELDS] = {0};
@@ -258,6 +289,8 @@ int main(int argc, char *argv[])
       FieldIndex fi   = recv_field_map[i];
       my_medians[fi]  = find_median(recv_args[i].soa.data, recv_args[i].soa.count);
       has_median[fi]  = true;
+      ORCH_LOG(rank, "median", "field %d median computed from %zu values",
+               fi, recv_args[i].soa.count);
       g_free(recv_args[i].soa.data);
    }
 
@@ -278,6 +311,7 @@ int main(int argc, char *argv[])
    GatherPayload *all_payloads = g_new(GatherPayload, rank == 0 ? mpi_size : 1);
    if (all_payloads == NULL)
       fatal_rank(rank, "out of memory allocating gather payload buffer");
+   ORCH_LOG(rank, "gather", "gathering payloads to root");
    {
       int rc = MPI_Gather(&my_payload,  sizeof(GatherPayload), MPI_BYTE,
                           all_payloads, sizeof(GatherPayload), MPI_BYTE,
@@ -296,6 +330,7 @@ int main(int argc, char *argv[])
             if (all_payloads[r].has_median[fi])
                medians[fi] = all_payloads[r].medians[fi];
       }
+      ORCH_LOG(rank, "gather", "root merged %zu rank payloads", mpi_size);
       g_free(all_payloads);
 
       const char *names[N_MEDIAN_FIELDS] = { "field2", "field3", "field4" };
@@ -332,6 +367,7 @@ int main(int argc, char *argv[])
          printf("\n");
       }
       printf("========================================\n");
+      ORCH_LOG(rank, "result", "result output complete for %zu total lines", final_agg.total_lines);
    } else {
       g_free(all_payloads);
    }

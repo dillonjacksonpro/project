@@ -5,6 +5,7 @@
 
 #include "fatal.h"
 #include "glib_compat.h"
+#include "logging.h"
 #include "mpi_types.h"
 
 void *
@@ -32,6 +33,8 @@ comms_thread_func(void *arg)
                         b->dest_rank, MEDIAN_TAGS[b->field_idx], MPI_COMM_WORLD);
       if (rc != MPI_SUCCESS)
          fatal_rank_mpi(rank, rc, "MPI_Send(batch)");
+      ORCH_LOG(rank, "worker", "sent batch field=%d count=%zu dest=%d",
+               b->field_idx, b->count, b->dest_rank);
       g_free(b);
    }
 
@@ -40,6 +43,8 @@ comms_thread_func(void *arg)
                         a->dest_ranks[fi], MEDIAN_TAGS[fi], MPI_COMM_WORLD);
       if (rc != MPI_SUCCESS)
          fatal_rank_mpi(rank, rc, "MPI_Send(done)");
+      ORCH_LOG(rank, "worker", "sent done signal field=%d dest=%d",
+               fi, a->dest_ranks[fi]);
    }
 
    return NULL;
@@ -71,6 +76,8 @@ recv_thread_func(void *arg)
          if (rc != MPI_SUCCESS)
             fatal_rank_mpi(a->source_rank, rc, "MPI_Recv(done)");
          dones++;
+         ORCH_LOG(a->source_rank, "worker", "received done signal %zu/%zu for tag=%d from %d",
+                  dones, a->size, a->tag, status.MPI_SOURCE);
       } else {
          if (count > SIZE_MAX - a->soa.count)
             fatal_rank(a->source_rank, "receiver count overflow");
@@ -92,6 +99,8 @@ recv_thread_func(void *arg)
             if (grown == NULL)
                fatal_rank(a->source_rank, "out of memory while growing receiver buffer");
             a->soa.data = grown;
+               ORCH_LOG(a->source_rank, "worker", "grew receiver buffer for tag=%d to %zu values",
+                        a->tag, a->soa.capacity);
          }
 
          rc = MPI_Recv(a->soa.data + a->soa.count, mpi_count, MEDIAN_MPI_TYPE,
@@ -99,6 +108,8 @@ recv_thread_func(void *arg)
          if (rc != MPI_SUCCESS)
             fatal_rank_mpi(a->source_rank, rc, "MPI_Recv(data)");
          a->soa.count += count;
+            ORCH_LOG(a->source_rank, "worker", "received batch tag=%d from %d count=%zu total=%zu",
+                     a->tag, status.MPI_SOURCE, count, a->soa.count);
       }
    }
    return NULL;

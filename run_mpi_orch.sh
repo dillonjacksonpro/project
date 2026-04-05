@@ -82,6 +82,9 @@ Examples:
     # Use defaults
     ./run_mpi_orch.sh
 
+    # Enable progress logging in the build
+    LOGGING=1 ./run_mpi_orch.sh -i /path/to/jobs_dir
+
     # Custom input directory
     ./run_mpi_orch.sh -i /path/to/jobs_dir
 
@@ -229,7 +232,7 @@ echo "Building binary..."
 echo "=========================================="
 
 if [[ -f "Makefile" ]]; then
-    make
+    make LOGGING="${LOGGING:-0}"
     echo "✓ Build successful"
 else
     echo "Error: Makefile not found; cannot build mpi_orch" >&2

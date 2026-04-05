@@ -8,6 +8,7 @@
 
 #include "csv_parse.h"
 #include "glib_compat.h"
+#include "logging.h"
 
 bool
 discover_rank_jobs(const char *input_path,
@@ -30,7 +31,10 @@ discover_rank_jobs(const char *input_path,
    char **all_jobs = NULL;
    size_t all_count = 0;
    size_t all_capacity = 0;
+   size_t regular_files = 0;
    bool fatal_error = false;
+
+   ORCH_LOG(rank, "discovery", "scanning %s across %zu ranks", input_path, mpi_size);
 
    struct dirent *ent;
    while ((ent = readdir(dir)) != NULL) {
@@ -67,6 +71,7 @@ discover_rank_jobs(const char *input_path,
          g_free(full_path);
          continue;
       }
+      regular_files++;
 
       if (all_count == all_capacity) {
          size_t next_capacity = all_capacity ? all_capacity * 2u : 256u;
@@ -113,6 +118,9 @@ discover_rank_jobs(const char *input_path,
          g_free(all_jobs[i]);
       }
    }
+
+   ORCH_LOG(rank, "discovery", "assigned %zu of %zu regular files from %s",
+            *job_count_out, regular_files, input_path);
 
    g_free(all_jobs);
    return true;

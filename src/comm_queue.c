@@ -5,6 +5,7 @@
 
 #include "fatal.h"
 #include "glib_compat.h"
+#include "logging.h"
 
 void
 comm_queue_init(CommQueue *q)
@@ -38,6 +39,15 @@ comm_queue_push(CommQueue *q, CommNode *node)
 {
    if (pthread_mutex_lock(&q->mutex) != 0)
       fatal_no_mpi("pthread_mutex_lock(comm queue push)");
+
+#if MPI_ORCH_LOGGING
+   int mpi_initialized = 0;
+   if (q->depth >= q->max_depth && MPI_Initialized(&mpi_initialized) == MPI_SUCCESS && mpi_initialized) {
+      MpiRank rank = 0;
+      if (MPI_Comm_rank(MPI_COMM_WORLD, &rank) == MPI_SUCCESS)
+         ORCH_LOG(rank, "queue", "queue full, waiting at depth %zu/%zu", q->depth, q->max_depth);
+   }
+#endif
 
    while (q->depth >= q->max_depth && !q->producers_done) {
       if (pthread_cond_wait(&q->not_full, &q->mutex) != 0)
@@ -134,14 +144,30 @@ stage_buf_flush(StageBuf *buf, FieldIndex field_idx, MpiRank dest_rank, CommQueu
    if (buf->count == 0)
       return;
 
+   MpiRank rank = 0;
+   {
+      int mpi_initialized = 0;
+      if (MPI_Initialized(&mpi_initialized) == MPI_SUCCESS && mpi_initialized) {
+         int rc = MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+         if (rc != MPI_SUCCESS)
+            rank = 0;
+      }
+   }
+
    SendBatch *batch = g_new(SendBatch, 1);
    if (batch == NULL) {
-      MpiRank rank = 0;
-      int rc = MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-      if (rc != MPI_SUCCESS)
-         fatal_no_mpi("MPI_Comm_rank failed in stage_buf_flush");
-      fatal_rank(rank, "out of memory while creating send batch");
+      int mpi_initialized = 0;
+      if (MPI_Initialized(&mpi_initialized) == MPI_SUCCESS && mpi_initialized) {
+         int rc = MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+         if (rc == MPI_SUCCESS) {
+            fatal_rank(rank, "out of memory while creating send batch");
+         }
+      }
+      fatal_no_mpi("out of memory while creating send batch");
    }
+
+   ORCH_LOG(rank, "queue", "flushing field %d to rank %d with %zu values",
+            field_idx, dest_rank, buf->count);
 
    atomic_init(&batch->node.next, NULL);
    memcpy(batch->values, buf->values, buf->count * sizeof(MedianValue));
