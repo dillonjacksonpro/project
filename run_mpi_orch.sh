@@ -25,6 +25,14 @@ print_slurm_env() {
     echo "--- end SLURM env dump ---"
 }
 
+print_slurm_mem_env() {
+    echo "--- SLURM memory env ---"
+    echo "SLURM_MEM_PER_CPU=${SLURM_MEM_PER_CPU:-<unset>}"
+    echo "SLURM_MEM_PER_NODE=${SLURM_MEM_PER_NODE:-<unset>}"
+    echo "SLURM_MEM_PER_GPU=${SLURM_MEM_PER_GPU:-<unset>}"
+    echo "--- end SLURM memory env ---"
+}
+
 # ============================================================================
 # Configuration - Defaults (can be overridden by args or SLURM env)
 # ============================================================================
@@ -96,6 +104,14 @@ EOF
             ;;
     esac
 done
+
+# In a SLURM allocation, scheduler resource policy comes from submit.slurm.
+# Keep runner values aligned to allocation-provided environment.
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    NUM_NODES=${SLURM_NNODES:-$NUM_NODES}
+    MAX_THREADS_PER_NODE=${SLURM_CPUS_PER_TASK:-$MAX_THREADS_PER_NODE}
+    PARTITION=${SLURM_JOB_PARTITION:-$PARTITION}
+fi
 
 # ============================================================================
 # Function: Build node-to-cores mapping
@@ -231,15 +247,28 @@ echo "Running mpi_orch..."
 echo "=========================================="
 echo ""
 
+print_slurm_mem_env
+echo ""
+
 # Launch MPI job
-srun ${PARTITION:+--partition=$PARTITION} \
-    --mpi=pmi2 \
-    --cpus-per-task=$MAX_THREADS_PER_NODE \
-    --ntasks=$NUM_NODES \
-    ./mpi_orch \
-    --input "$INPUT_FILE" \
-    --nodes "$NODE_MAP" \
-    --threads "$MAX_THREADS_PER_NODE"
+if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    env -u SLURM_MEM_PER_CPU -u SLURM_MEM_PER_NODE -u SLURM_MEM_PER_GPU \
+    srun --mpi=pmi2 \
+        ./mpi_orch \
+        --input "$INPUT_FILE" \
+        --nodes "$NODE_MAP" \
+        --threads "$MAX_THREADS_PER_NODE"
+else
+    env -u SLURM_MEM_PER_CPU -u SLURM_MEM_PER_NODE -u SLURM_MEM_PER_GPU \
+    srun ${PARTITION:+--partition=$PARTITION} \
+        --mpi=pmi2 \
+        --cpus-per-task=$MAX_THREADS_PER_NODE \
+        --ntasks=$NUM_NODES \
+        ./mpi_orch \
+        --input "$INPUT_FILE" \
+        --nodes "$NODE_MAP" \
+        --threads "$MAX_THREADS_PER_NODE"
+fi
 
 EXIT_CODE=$?
 
