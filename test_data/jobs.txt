@@ -1,0 +1,4 @@
+job_path
+/home/dzjxb2/code/hpc/a2/project/test_data/chunk_00.csv
+/home/dzjxb2/code/hpc/a2/project/test_data/chunk_01.csv
+/home/dzjxb2/code/hpc/a2/project/test_data/chunk_02.csv

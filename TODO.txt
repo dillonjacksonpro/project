@@ -1,0 +1,29 @@
+slurm script: needs to pass on file target, and load the needed modules in
+    add perf, distributed SLOWER hooks, and timing, then build online before launch.
+
+Is slurm assign heterogeneious nodes, if so we need the node to core mappings
+
+long term: add context hooks, this makes metrics and logging much easier!
+
+
+
+job file format
+skip first line
+crawl csv file paths
+
+csv file format
+skip first line
+website, bytecount, wordcount, linecount
+
+
+easy performance gains
+
+simple preload of next file
+have a communication thread whose only job is to stream median data to a rank
+at those ranks have a communciation thread whose only job to recieve that data
+then instead of shuffle, we can 
+
+push checking to the bash, remove from c file
+
+openmpi/4.1.5_gcc_12.3.0
+gcc

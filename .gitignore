@@ -1,6 +1,48 @@
-TODO.txt
-file_list.txt
-mpi_arch
+# ------------------------------
+# Project binaries and build outputs
+# ------------------------------
 mpi_orch
-test_data/
-glib_usage_list.md
+mpi_orch_asan
+mpi_arch
+
+# Temporary objects/dependency files
+*.o
+*.obj
+*.d
+*.a
+*.so
+*.out
+
+# ------------------------------
+# Test build artifacts
+# ------------------------------
+tests/bin/
+
+# Optional test/coverage outputs
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# ------------------------------
+# Logs and runtime dumps
+# ------------------------------
+*.log
+*.tmp
+*.swp
+*.swo
+core
+core.*
+
+# ------------------------------
+# Editor/IDE files
+# ------------------------------
+.vscode/
+.idea/
+*.user
+
+# ------------------------------
+# OS junk
+# ------------------------------
+.DS_Store
+Thumbs.db
