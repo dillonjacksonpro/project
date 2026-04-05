@@ -2,11 +2,24 @@
 
 #include <limits.h>
 #include <mpi.h>
+#include <time.h>
 
 #include "fatal.h"
 #include "glib_compat.h"
 #include "logging.h"
 #include "mpi_types.h"
+
+static uint64_t
+mono_now_ns(void)
+{
+   struct timespec ts;
+   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+      return 0;
+   return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+}
+
+/* Emit wait logs only when the receiver actually idled for a meaningful time. */
+#define RECV_BLOCK_LOG_THRESHOLD_NS UINT64_C(1000000)
 
 void *
 comms_thread_func(void *arg)
@@ -58,9 +71,17 @@ recv_thread_func(void *arg)
 
    while (dones < a->size) {
       MPI_Status status;
+      uint64_t probe_start_ns = mono_now_ns();
       int rc = MPI_Probe(MPI_ANY_SOURCE, a->tag, MPI_COMM_WORLD, &status);
       if (rc != MPI_SUCCESS)
          fatal_rank_mpi(a->source_rank, rc, "MPI_Probe");
+      uint64_t probe_end_ns = mono_now_ns();
+      uint64_t probe_wait_ns = (probe_end_ns >= probe_start_ns) ? (probe_end_ns - probe_start_ns) : 0;
+      if (probe_wait_ns >= RECV_BLOCK_LOG_THRESHOLD_NS) {
+         ORCH_LOG_ALWAYS(a->source_rank, "block",
+                         "receiver tag=%d waited %.3f ms for MPI message",
+                         a->tag, (double)probe_wait_ns / 1.0e6);
+      }
 
       MpiCount mpi_count = 0;
       rc = MPI_Get_count(&status, MEDIAN_MPI_TYPE, &mpi_count);

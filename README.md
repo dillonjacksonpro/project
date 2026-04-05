@@ -25,7 +25,36 @@ Enable progress logging at build time with:
 make LOGGING=1
 ```
 
-The logging build prints detailed progress messages to stderr from all ranks.
+The logging build prints progress messages to stderr from all ranks.
+
+## Logging behavior
+
+Logging is compile-time gated and runtime sampled:
+
+- Build with `LOGGING=1` to include logging code paths.
+- By default, regular logs are randomly sampled at 10% to reduce overhead.
+- Set `MPI_ORCH_LOG_SAMPLE_PCT` (0-100) to tune sampling at runtime.
+
+Examples:
+
+```bash
+# Logging enabled, default sampling (10%)
+LOGGING=1 ./run_mpi_orch.sh -i test_data -t 4
+
+# Logging enabled, sample only 2% of regular logs
+LOGGING=1 MPI_ORCH_LOG_SAMPLE_PCT=2 ./run_mpi_orch.sh -i test_data -t 4
+
+# Logging enabled, full regular logs (no sampling)
+LOGGING=1 MPI_ORCH_LOG_SAMPLE_PCT=100 ./run_mpi_orch.sh -i test_data -t 4
+```
+
+Blocking/pause visibility:
+
+- Queue producer blocked on full queue, then resumed (with wait time).
+- Queue consumer blocked on empty queue, then resumed (with wait time).
+- Receiver thread waiting on incoming MPI messages (logged when wait is noticeable).
+
+These blocking/pause logs are emitted as critical activity markers when logging is enabled so you can see stalls even when regular logs are sampled.
 
 ## Local run
 
@@ -103,5 +132,6 @@ Each CSV file is treated as:
 ## Notes
 
 - The default build keeps logging out of the binary.
-- `LOGGING=1` enables the progress logging hooks added throughout the orchestrator.
+- `LOGGING=1` enables logging hooks throughout the orchestrator.
+- `MPI_ORCH_LOG_SAMPLE_PCT` controls runtime sampling for regular logs when logging is enabled.
 - The job log location is determined by `submit.slurm`, so the tmux log window waits for the newest `output/run_<job_id>/mpi_orch.log` file and tails it.

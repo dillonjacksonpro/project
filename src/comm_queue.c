@@ -2,10 +2,35 @@
 
 #include <mpi.h>
 #include <string.h>
+#include <time.h>
 
 #include "fatal.h"
 #include "glib_compat.h"
 #include "logging.h"
+
+#if MPI_ORCH_LOGGING
+static uint64_t
+mono_now_ns(void)
+{
+   struct timespec ts;
+   if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+      return 0;
+   return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+}
+
+static MpiRank
+log_rank_or_zero(void)
+{
+   int mpi_initialized = 0;
+   if (MPI_Initialized(&mpi_initialized) != MPI_SUCCESS || !mpi_initialized)
+      return 0;
+
+   MpiRank rank = 0;
+   if (MPI_Comm_rank(MPI_COMM_WORLD, &rank) != MPI_SUCCESS)
+      return 0;
+   return rank;
+}
+#endif
 
 void
 comm_queue_init(CommQueue *q)
@@ -41,18 +66,34 @@ comm_queue_push(CommQueue *q, CommNode *node)
       fatal_no_mpi("pthread_mutex_lock(comm queue push)");
 
 #if MPI_ORCH_LOGGING
-   int mpi_initialized = 0;
-   if (q->depth >= q->max_depth && MPI_Initialized(&mpi_initialized) == MPI_SUCCESS && mpi_initialized) {
-      MpiRank rank = 0;
-      if (MPI_Comm_rank(MPI_COMM_WORLD, &rank) == MPI_SUCCESS)
-         ORCH_LOG(rank, "queue", "queue full, waiting at depth %zu/%zu", q->depth, q->max_depth);
-   }
+   bool blocked = false;
+   size_t wait_loops = 0;
+   uint64_t wait_start_ns = 0;
 #endif
 
    while (q->depth >= q->max_depth && !q->producers_done) {
+#if MPI_ORCH_LOGGING
+      if (!blocked) {
+         wait_start_ns = mono_now_ns();
+         blocked = true;
+         ORCH_LOG_ALWAYS(log_rank_or_zero(), "block",
+                         "queue producer blocked: depth=%zu/%zu", q->depth, q->max_depth);
+      }
+      wait_loops++;
+   #endif
       if (pthread_cond_wait(&q->not_full, &q->mutex) != 0)
          fatal_no_mpi("pthread_cond_wait(comm queue not_full)");
    }
+
+   #if MPI_ORCH_LOGGING
+   if (blocked) {
+      uint64_t wait_end_ns = mono_now_ns();
+      uint64_t waited_ns = (wait_end_ns >= wait_start_ns) ? (wait_end_ns - wait_start_ns) : 0;
+      ORCH_LOG_ALWAYS(log_rank_or_zero(), "block",
+                      "queue producer resumed after %.3f ms (%zu wakeups)",
+                      (double)waited_ns / 1.0e6, wait_loops);
+   }
+#endif
 
    atomic_store_explicit(&node->next, NULL, memory_order_relaxed);
    if (q->tail != NULL) {
@@ -100,10 +141,34 @@ comm_queue_pop_wait(CommQueue *q)
    if (pthread_mutex_lock(&q->mutex) != 0)
       fatal_no_mpi("pthread_mutex_lock(comm queue pop_wait)");
 
+#if MPI_ORCH_LOGGING
+   bool blocked = false;
+   size_t wait_loops = 0;
+   uint64_t wait_start_ns = 0;
+#endif
+
    while (q->head == NULL && !q->producers_done) {
+#if MPI_ORCH_LOGGING
+      if (!blocked) {
+         wait_start_ns = mono_now_ns();
+         blocked = true;
+         ORCH_LOG_ALWAYS(log_rank_or_zero(), "block", "queue consumer blocked: queue empty");
+      }
+      wait_loops++;
+#endif
       if (pthread_cond_wait(&q->not_empty, &q->mutex) != 0)
          fatal_no_mpi("pthread_cond_wait(comm queue not_empty)");
    }
+
+#if MPI_ORCH_LOGGING
+   if (blocked) {
+      uint64_t wait_end_ns = mono_now_ns();
+      uint64_t waited_ns = (wait_end_ns >= wait_start_ns) ? (wait_end_ns - wait_start_ns) : 0;
+      ORCH_LOG_ALWAYS(log_rank_or_zero(), "block",
+                      "queue consumer resumed after %.3f ms (%zu wakeups)",
+                      (double)waited_ns / 1.0e6, wait_loops);
+   }
+#endif
 
    if (q->head == NULL && q->producers_done) {
       if (pthread_mutex_unlock(&q->mutex) != 0)
