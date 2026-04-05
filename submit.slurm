@@ -5,8 +5,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=00:10:00
-#SBATCH --output=output/run_%j/mpi_orch.out
-#SBATCH --error=output/run_%j/mpi_orch.err
 
 # ============================================================================
 # submit.slurm - SLURM wrapper for run_mpi_orch.sh
@@ -23,9 +21,12 @@
 
 set -e
 
-# Ensure output directory exists for this job
+# Ensure output directory exists for this job and keep all output in one place.
 mkdir -p "output/run_${SLURM_JOB_ID}"
 OUTPUT_DIR="output/run_${SLURM_JOB_ID}"
+JOB_LOG="$OUTPUT_DIR/mpi_orch.log"
+
+exec > >(tee -a "$JOB_LOG") 2>&1
 
 EXPECTED_JOB_NAME="mpi_orch"
 
@@ -39,8 +40,9 @@ INPUT_FILE="${1:-input.txt}"
 
 echo "SLURM partition: ${SLURM_JOB_PARTITION:-unknown}"
 echo "Output directory: $OUTPUT_DIR"
+echo "Job log: $JOB_LOG"
 
 # Call the main runner script, passing argument and inheriting SLURM env vars
-./run_mpi_orch.sh --input "$INPUT_FILE" --output "$OUTPUT_DIR"
+./run_mpi_orch.sh --input "$INPUT_FILE"
 
 exit $?
